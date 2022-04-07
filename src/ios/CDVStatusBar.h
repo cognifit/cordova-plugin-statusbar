@@ -39,6 +39,9 @@
 - (void) styleBlackTranslucent:(CDVInvokedUrlCommand*)command;
 - (void) styleBlackOpaque:(CDVInvokedUrlCommand*)command;
 
+- (void) styleDarkMode:(CDVInvokedUrlCommand*)command;
+- (void) styleLightMode:(CDVInvokedUrlCommand*)command;
+
 - (void) backgroundColorByName:(CDVInvokedUrlCommand*)command;
 - (void) backgroundColorByHexString:(CDVInvokedUrlCommand*)command;
 

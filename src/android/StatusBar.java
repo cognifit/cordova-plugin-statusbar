@@ -210,6 +210,16 @@ public class StatusBar extends CordovaPlugin {
             return true;
         }
 
+        if ("styleDarkMode".equals(action)) {
+            // to-do, if required
+            return true;
+        }
+
+        if ("styleLightMode".equals(action)) {
+            // to-do, if required
+            return true;
+        }
+
         return false;
     }
 

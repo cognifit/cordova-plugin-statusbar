@@ -67,6 +67,14 @@ var StatusBar = {
     exec(null, null, "StatusBar", "styleBlackOpaque", []);
   },
 
+  styleDarkMode: function () {
+    exec(null, null, "StatusBar", "styleDarkMode", []);
+  },
+
+  styleLightMode: function () {
+    exec(null, null, "StatusBar", "styleLightMode", []);
+  },
+
   backgroundColorByName: function (colorname) {
     return StatusBar.backgroundColorByHexString(namedColors[colorname]);
   },

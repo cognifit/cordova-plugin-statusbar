@@ -321,6 +321,18 @@ static const void *kStatusBarStyle = &kStatusBarStyle;
     [self setStyleForStatusBar:UIStatusBarStyleLightContent];
 }
 
+- (void) styleDarkMode:(CDVInvokedUrlCommand*)command {
+    [self setStyleForStatusBar:UIStatusBarStyleLightContent];
+}
+
+- (void) styleLightMode:(CDVInvokedUrlCommand*)command {
+    if (@available(iOS 13.0, *)) {
+        [self setStyleForStatusBar:UIStatusBarStyleDarkContent];
+    } else {
+        [self setStyleForStatusBar:UIStatusBarStyleDefault];
+    }
+}
+
 - (void) backgroundColorByName:(CDVInvokedUrlCommand*)command
 {
     id value = [command argumentAtIndex:0];
