@@ -20,11 +20,21 @@
 package org.apache.cordova.statusbar;
 
 import android.app.Activity;
+import android.content.res.Configuration;
 import android.graphics.Color;
 import android.os.Build;
 import android.view.View;
 import android.view.Window;
 import android.view.WindowManager;
+
+import android.view.ViewGroup;
+import android.view.ViewParent;
+
+import androidx.core.view.ViewCompat;
+import androidx.core.view.WindowCompat;
+import androidx.core.view.WindowInsetsCompat;
+import androidx.core.view.WindowInsetsControllerCompat;
+import androidx.core.content.ContextCompat;
 
 import org.apache.cordova.CallbackContext;
 import org.apache.cordova.CordovaArgs;
@@ -38,6 +48,7 @@ import java.util.Arrays;
 
 public class StatusBar extends CordovaPlugin {
     private static final String TAG = "StatusBar";
+    private CordovaWebView cordovaWebView;
 
     /**
      * Sets the context of the Command. This can then be used to do things like
@@ -50,6 +61,7 @@ public class StatusBar extends CordovaPlugin {
     public void initialize(final CordovaInterface cordova, CordovaWebView webView) {
         LOG.v(TAG, "StatusBar: initialization");
         super.initialize(cordova, webView);
+        this.cordovaWebView = webView;
 
         this.cordova.getActivity().runOnUiThread(new Runnable() {
             @Override
@@ -62,15 +74,34 @@ public class StatusBar extends CordovaPlugin {
                 // Read 'StatusBarOverlaysWebView' from config.xml, default is true.
                 setStatusBarTransparent(preferences.getBoolean("StatusBarOverlaysWebView", true));
 
-                // Read 'StatusBarBackgroundColor' from config.xml, default is #000000.
-                setStatusBarBackgroundColor(preferences.getString("StatusBarBackgroundColor", "#000000"));
+                String backgroundColor = preferences.getString("StatusBarBackgroundColor", null);
+                setStatusBarBackgroundColor(backgroundColor != null
+                        ? backgroundColor : getThemeStatusBarColor());
 
-                // Read 'StatusBarStyle' from config.xml, default is 'lightcontent'.
-                String styleSetting = preferences.getString("StatusBarStyle", "lightcontent");
+                String styleSetting = preferences.getString("StatusBarStyle", null);
+                if (styleSetting == null || styleSetting.isEmpty()) {
+                    styleSetting = isDarkTheme() ? "lightcontent" : "default";
+                }
                 if (styleSetting.equalsIgnoreCase("blacktranslucent") || styleSetting.equalsIgnoreCase("blackopaque")) {
                     LOG.w(TAG, styleSetting +" is deprecated and will be removed in next major release, use lightcontent");
                 }
                 setStatusBarStyle(styleSetting);
+            }
+        });
+    }
+
+    @Override
+    public void onConfigurationChanged(Configuration newConfig) {
+        super.onConfigurationChanged(newConfig);
+        cordova.getActivity().runOnUiThread(new Runnable() {
+            @Override
+            public void run() {
+                if (!preferences.contains("StatusBarBackgroundColor")) {
+                    setStatusBarBackgroundColor(getThemeStatusBarColor());
+                }
+                if (!preferences.contains("StatusBarStyle")) {
+                    setStatusBarStyle(isDarkTheme() ? "lightcontent" : "default");
+                }
             }
         });
     }
@@ -90,7 +121,14 @@ public class StatusBar extends CordovaPlugin {
         final Window window = activity.getWindow();
 
         if ("_ready".equals(action)) {
-            boolean statusBarVisible = (window.getAttributes().flags & WindowManager.LayoutParams.FLAG_FULLSCREEN) == 0;
+            boolean statusBarVisible;
+            if (isCordovaAndroid15OrLater() && window.getDecorView().getRootWindowInsets() != null) {
+                WindowInsetsCompat insets = WindowInsetsCompat.toWindowInsetsCompat(
+                        window.getDecorView().getRootWindowInsets());
+                statusBarVisible = insets.isVisible(WindowInsetsCompat.Type.statusBars());
+            } else {
+                statusBarVisible = (window.getAttributes().flags & WindowManager.LayoutParams.FLAG_FULLSCREEN) == 0;
+            }
             callbackContext.sendPluginResult(new PluginResult(PluginResult.Status.OK, statusBarVisible));
             return true;
         }
@@ -99,6 +137,29 @@ public class StatusBar extends CordovaPlugin {
             this.cordova.getActivity().runOnUiThread(new Runnable() {
                 @Override
                 public void run() {
+                    if (isCordovaAndroid15OrLater()) {
+                        // The legacy plugin may have left the old fullscreen/layout flags set.
+                        // Clear them before asking the Android 11+ controller to show the bar.
+                        View decor = window.getDecorView();
+                        int uiOptions = decor.getSystemUiVisibility();
+                        uiOptions &= ~(View.SYSTEM_UI_FLAG_FULLSCREEN
+                                | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+                                | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
+                                | View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY);
+                        uiOptions |= View.SYSTEM_UI_FLAG_LAYOUT_STABLE;
+                        decor.setSystemUiVisibility(uiOptions);
+                        WindowCompat.setDecorFitsSystemWindows(window, false);
+                        WindowInsetsControllerCompat controller = getInsetsController(window);
+                        if (controller != null) {
+                            controller.setSystemBarsBehavior(
+                                    WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);
+                            controller.show(WindowInsetsCompat.Type.statusBars());
+                        }
+                        window.clearFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN);
+                        setCordovaStatusBarViewVisible(true);
+                        requestCordovaInsets();
+                        return;
+                    }
                     // SYSTEM_UI_FLAG_FULLSCREEN is available since JellyBean, but we
                     // use KitKat here to be aligned with "Fullscreen"  preference
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT) {
@@ -121,6 +182,16 @@ public class StatusBar extends CordovaPlugin {
             this.cordova.getActivity().runOnUiThread(new Runnable() {
                 @Override
                 public void run() {
+                    if (isCordovaAndroid15OrLater()) {
+                        WindowInsetsControllerCompat controller = getInsetsController(window);
+                        if (controller != null) {
+                            controller.hide(WindowInsetsCompat.Type.statusBars());
+                        }
+                        window.addFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN);
+                        setCordovaStatusBarViewVisible(false);
+                        requestCordovaInsets();
+                        return;
+                    }
                     // SYSTEM_UI_FLAG_FULLSCREEN is available since JellyBean, but we
                     // use KitKat here to be aligned with "Fullscreen"  preference
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT) {
@@ -232,7 +303,9 @@ public class StatusBar extends CordovaPlugin {
                 window.addFlags(0x80000000); // SDK 21: WindowManager.LayoutParams.FLAG_DRAWS_SYSTEM_BAR_BACKGROUNDS);
                 try {
                     // Using reflection makes sure any 5.0+ device will work without having to compile with SDK level 21
-                    window.getClass().getMethod("setStatusBarColor", int.class).invoke(window, Color.parseColor(colorPref));
+                    int color = Color.parseColor(colorPref);
+                    window.getClass().getMethod("setStatusBarColor", int.class).invoke(window, color);
+                    setCordovaStatusBarViewColor(color);
                 } catch (IllegalArgumentException ignore) {
                     LOG.e(TAG, "Invalid hexString argument, use f.i. '#999999'");
                 } catch (Exception ignore) {
@@ -247,10 +320,14 @@ public class StatusBar extends CordovaPlugin {
         if (Build.VERSION.SDK_INT >= 21) {
             final Window window = cordova.getActivity().getWindow();
             if (transparent) {
+                if (isCordovaAndroid15OrLater()) {
+                    WindowCompat.setDecorFitsSystemWindows(window, false);
+                }
                 window.getDecorView().setSystemUiVisibility(
                         View.SYSTEM_UI_FLAG_LAYOUT_STABLE
                                 | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN);
                 window.setStatusBarColor(Color.TRANSPARENT);
+                setCordovaStatusBarViewColor(Color.TRANSPARENT);
             }
             else {
                 window.getDecorView().setSystemUiVisibility(
@@ -288,6 +365,79 @@ public class StatusBar extends CordovaPlugin {
 
                 LOG.e(TAG, "Invalid style, must be either 'default', 'lightcontent' or the deprecated 'blacktranslucent' and 'blackopaque'");
             }
+        }
+    }
+
+    private boolean isCordovaAndroid15OrLater() {
+        try {
+            String version = CordovaWebView.CORDOVA_VERSION;
+            int dot = version.indexOf('.');
+            int major = Integer.parseInt(dot >= 0 ? version.substring(0, dot) : version);
+            return major >= 15;
+        } catch (Exception ignored) {
+            return false;
+        }
+    }
+
+    private WindowInsetsControllerCompat getInsetsController(Window window) {
+        return WindowCompat.getInsetsController(window, window.getDecorView());
+    }
+
+    private boolean isDarkTheme() {
+        return (cordova.getActivity().getResources().getConfiguration().uiMode
+                & Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES;
+    }
+
+    private String getThemeStatusBarColor() {
+        int colorId = cordova.getActivity().getResources().getIdentifier(
+                "cdv_background_color", "color", cordova.getActivity().getPackageName());
+        if (colorId != 0) {
+            return String.format("#%08X", ContextCompat.getColor(cordova.getActivity(), colorId));
+        }
+        return isDarkTheme() ? "#121318" : "#FAF8FF";
+    }
+
+    private void setCordovaStatusBarViewColor(int color) {
+        if (cordovaWebView == null) return;
+        View webView = cordovaWebView.getView();
+        ViewParent parent = webView.getParent();
+        while (parent instanceof ViewGroup) {
+            ViewGroup group = (ViewGroup) parent;
+            for (int i = 0; i < group.getChildCount(); i++) {
+                View child = group.getChildAt(i);
+                if ("statusBarView".equals(child.getTag())) {
+                    child.setBackgroundColor(color);
+                    return;
+                }
+            }
+            parent = group.getParent();
+        }
+    }
+
+    /** Keep Cordova 15's synthetic inset view in sync with the real system bar. */
+    private void setCordovaStatusBarViewVisible(boolean visible) {
+        if (cordovaWebView == null) return;
+        View webView = cordovaWebView.getView();
+        ViewParent parent = webView.getParent();
+        while (parent instanceof ViewGroup) {
+            ViewGroup group = (ViewGroup) parent;
+            for (int i = 0; i < group.getChildCount(); i++) {
+                View child = group.getChildAt(i);
+                if ("statusBarView".equals(child.getTag())) {
+                    child.setVisibility(visible ? View.VISIBLE : View.GONE);
+                    return;
+                }
+            }
+            parent = group.getParent();
+        }
+    }
+
+    private void requestCordovaInsets() {
+        if (cordovaWebView == null) return;
+        View webView = cordovaWebView.getView();
+        ViewParent parent = webView.getParent();
+        if (parent instanceof View) {
+            ViewCompat.requestApplyInsets((View) parent);
         }
     }
 }
