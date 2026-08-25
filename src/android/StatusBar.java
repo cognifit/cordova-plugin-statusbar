@@ -98,6 +98,14 @@ public class StatusBar extends CordovaPlugin {
     }
 
     @Override
+    public Object onMessage(String id, Object data) {
+        if ("updateSystemBars".equals(id)) {
+            scheduleOpaqueNavigationBarUpdate();
+        }
+        return null;
+    }
+
+    @Override
     public void onConfigurationChanged(Configuration newConfig) {
         super.onConfigurationChanged(newConfig);
         cordova.getActivity().runOnUiThread(new Runnable() {
@@ -414,11 +422,15 @@ public class StatusBar extends CordovaPlugin {
             public void run() {
                 Window window = cordova.getActivity().getWindow();
                 int color = Color.parseColor(getThemeStatusBarColor());
+                if (!preferences.getBoolean("StatusBarOverlaysWebView", true)) {
+                    window.setStatusBarColor(color);
+                    setCordovaStatusBarViewColor(color);
+                }
                 window.setNavigationBarColor(color);
                 WindowInsetsControllerCompat controller = WindowCompat.getInsetsController(window, window.getDecorView());
                 controller.setAppearanceLightNavigationBars(!isDarkTheme());
             }
-        }, 50);
+        }, 150);
     }
 
     private void setCordovaStatusBarViewColor(int color) {
