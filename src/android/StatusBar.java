@@ -86,8 +86,15 @@ public class StatusBar extends CordovaPlugin {
                     LOG.w(TAG, styleSetting +" is deprecated and will be removed in next major release, use lightcontent");
                 }
                 setStatusBarStyle(styleSetting);
+                scheduleOpaqueNavigationBarUpdate();
             }
         });
+    }
+
+    @Override
+    public void onResume(boolean multitasking) {
+        super.onResume(multitasking);
+        scheduleOpaqueNavigationBarUpdate();
     }
 
     @Override
@@ -102,6 +109,7 @@ public class StatusBar extends CordovaPlugin {
                 if (!preferences.contains("StatusBarStyle")) {
                     setStatusBarStyle(isDarkTheme() ? "lightcontent" : "default");
                 }
+                scheduleOpaqueNavigationBarUpdate();
             }
         });
     }
@@ -395,6 +403,22 @@ public class StatusBar extends CordovaPlugin {
             return String.format("#%08X", ContextCompat.getColor(cordova.getActivity(), colorId));
         }
         return isDarkTheme() ? "#121318" : "#FAF8FF";
+    }
+
+    /** Cordova 15 makes the navigation bar transparent in edge-to-edge mode. */
+    private void scheduleOpaqueNavigationBarUpdate() {
+        if (!isCordovaAndroid15OrLater()) return;
+        View decor = cordova.getActivity().getWindow().getDecorView();
+        decor.postDelayed(new Runnable() {
+            @Override
+            public void run() {
+                Window window = cordova.getActivity().getWindow();
+                int color = Color.parseColor(getThemeStatusBarColor());
+                window.setNavigationBarColor(color);
+                WindowInsetsControllerCompat controller = WindowCompat.getInsetsController(window, window.getDecorView());
+                controller.setAppearanceLightNavigationBars(!isDarkTheme());
+            }
+        }, 50);
     }
 
     private void setCordovaStatusBarViewColor(int color) {
