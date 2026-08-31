@@ -31,6 +31,7 @@ import android.view.ViewGroup;
 import android.view.ViewParent;
 
 import androidx.core.view.ViewCompat;
+import androidx.core.graphics.Insets;
 import androidx.core.view.WindowCompat;
 import androidx.core.view.WindowInsetsCompat;
 import androidx.core.view.WindowInsetsControllerCompat;
@@ -414,6 +415,23 @@ public class StatusBar extends CordovaPlugin {
     }
 
     /** Cordova 15 makes the navigation bar transparent in edge-to-edge mode. */
+    private boolean isGestureNavigation(Window window) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return false;
+
+        WindowInsetsCompat insets = ViewCompat.getRootWindowInsets(window.getDecorView());
+        if (insets == null) return false;
+
+        Insets navigationBars = insets.getInsetsIgnoringVisibility(WindowInsetsCompat.Type.navigationBars());
+        Insets mandatoryGestures = insets.getInsets(WindowInsetsCompat.Type.mandatorySystemGestures());
+        int navigationInset = Math.max(
+                Math.max(navigationBars.left, navigationBars.right),
+                Math.max(navigationBars.top, navigationBars.bottom));
+        int gestureInset = Math.max(
+                Math.max(mandatoryGestures.left, mandatoryGestures.right),
+                Math.max(mandatoryGestures.top, mandatoryGestures.bottom));
+        return navigationInset == 0 && gestureInset > 0;
+    }
+
     private void scheduleOpaqueNavigationBarUpdate() {
         if (!isCordovaAndroid15OrLater()) return;
         View decor = cordova.getActivity().getWindow().getDecorView();
@@ -426,13 +444,14 @@ public class StatusBar extends CordovaPlugin {
                     window.setStatusBarColor(color);
                     setCordovaStatusBarViewColor(color);
                 }
-                // Cordova Android 15 uses edge-to-edge layout. Painting the
-                // navigation bar with the theme color creates a native strip
-                // outside the WebView, especially when navigation is gesture
-                // based. Keep the navigation area transparent instead.
-                window.setNavigationBarColor(Color.TRANSPARENT);
+                boolean gestureNavigation = isGestureNavigation(window);
+                if (gestureNavigation) {
+                    window.setNavigationBarColor(Color.TRANSPARENT);
+                } else {
+                    window.setNavigationBarColor(color);
+                }
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-                    window.setNavigationBarDividerColor(Color.TRANSPARENT);
+                    window.setNavigationBarDividerColor(gestureNavigation ? Color.TRANSPARENT : color);
                 }
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                     window.setNavigationBarContrastEnforced(false);
