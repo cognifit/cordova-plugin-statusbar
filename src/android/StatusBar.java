@@ -426,7 +426,17 @@ public class StatusBar extends CordovaPlugin {
                     window.setStatusBarColor(color);
                     setCordovaStatusBarViewColor(color);
                 }
-                window.setNavigationBarColor(color);
+                // Cordova Android 15 uses edge-to-edge layout. Painting the
+                // navigation bar with the theme color creates a native strip
+                // outside the WebView, especially when navigation is gesture
+                // based. Keep the navigation area transparent instead.
+                window.setNavigationBarColor(Color.TRANSPARENT);
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                    window.setNavigationBarDividerColor(Color.TRANSPARENT);
+                }
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    window.setNavigationBarContrastEnforced(false);
+                }
                 WindowInsetsControllerCompat controller = WindowCompat.getInsetsController(window, window.getDecorView());
                 controller.setAppearanceLightNavigationBars(!isDarkTheme());
             }
