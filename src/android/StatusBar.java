@@ -30,6 +30,8 @@ import android.view.WindowManager;
 
 import android.view.ViewGroup;
 import android.view.ViewParent;
+import android.view.Gravity;
+import android.widget.FrameLayout;
 
 import androidx.core.view.ViewCompat;
 import androidx.core.graphics.Insets;
@@ -52,6 +54,7 @@ public class StatusBar extends CordovaPlugin {
     private static final String TAG = "StatusBar";
     private CordovaWebView cordovaWebView;
     private android.view.ViewTreeObserver.OnGlobalLayoutListener navigationBarLayoutListener;
+    private View navigationBarProtectionView;
 
     /**
      * Sets the context of the Command. This can then be used to do things like
@@ -472,8 +475,42 @@ public class StatusBar extends CordovaPlugin {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             window.setNavigationBarContrastEnforced(false);
         }
+        updateNavigationBarProtectionView(window, color, gestureNavigation);
         WindowInsetsControllerCompat controller = WindowCompat.getInsetsController(window, window.getDecorView());
         controller.setAppearanceLightNavigationBars(!isDarkTheme());
+    }
+
+    /**
+     * Android 15+ ignores the requested navigation-bar color for edge-to-edge
+     * windows. Draw the color in app content behind the button navigation bar
+     * instead, while leaving gesture navigation transparent.
+     */
+    private void updateNavigationBarProtectionView(Window window, int color, boolean gestureNavigation) {
+        ViewGroup content = cordova.getActivity().findViewById(android.R.id.content);
+        if (content == null) return;
+
+        if (navigationBarProtectionView == null) {
+            navigationBarProtectionView = new View(cordova.getActivity());
+            navigationBarProtectionView.setTag("navigationBarProtectionView");
+            content.addView(navigationBarProtectionView,
+                    new FrameLayout.LayoutParams(
+                            ViewGroup.LayoutParams.MATCH_PARENT, 0, Gravity.BOTTOM));
+        }
+
+        int height = 0;
+        WindowInsetsCompat insets = ViewCompat.getRootWindowInsets(window.getDecorView());
+        if (!gestureNavigation && insets != null) {
+            height = insets.getInsets(WindowInsetsCompat.Type.tappableElement()).bottom;
+        }
+
+        FrameLayout.LayoutParams layoutParams =
+                (FrameLayout.LayoutParams) navigationBarProtectionView.getLayoutParams();
+        layoutParams.width = ViewGroup.LayoutParams.MATCH_PARENT;
+        layoutParams.height = height;
+        layoutParams.gravity = Gravity.BOTTOM;
+        navigationBarProtectionView.setLayoutParams(layoutParams);
+        navigationBarProtectionView.setBackgroundColor(color);
+        navigationBarProtectionView.setVisibility(height > 0 ? View.VISIBLE : View.GONE);
     }
 
 
@@ -485,6 +522,13 @@ public class StatusBar extends CordovaPlugin {
                 decor.getViewTreeObserver().removeOnGlobalLayoutListener(navigationBarLayoutListener);
             }
             navigationBarLayoutListener = null;
+        }
+        if (navigationBarProtectionView != null) {
+            ViewParent parent = navigationBarProtectionView.getParent();
+            if (parent instanceof ViewGroup) {
+                ((ViewGroup) parent).removeView(navigationBarProtectionView);
+            }
+            navigationBarProtectionView = null;
         }
         super.onDestroy();
     }
