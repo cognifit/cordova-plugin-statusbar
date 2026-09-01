@@ -23,6 +23,7 @@ import android.app.Activity;
 import android.content.res.Configuration;
 import android.graphics.Color;
 import android.os.Build;
+import android.provider.Settings;
 import android.view.View;
 import android.view.Window;
 import android.view.WindowManager;
@@ -50,6 +51,7 @@ import java.util.Arrays;
 public class StatusBar extends CordovaPlugin {
     private static final String TAG = "StatusBar";
     private CordovaWebView cordovaWebView;
+    private android.view.ViewTreeObserver.OnGlobalLayoutListener navigationBarLayoutListener;
 
     /**
      * Sets the context of the Command. This can then be used to do things like
@@ -88,6 +90,7 @@ public class StatusBar extends CordovaPlugin {
                 }
                 setStatusBarStyle(styleSetting);
                 scheduleOpaqueNavigationBarUpdate();
+                registerNavigationBarLayoutListener();
             }
         });
     }
@@ -415,11 +418,19 @@ public class StatusBar extends CordovaPlugin {
     }
 
     /** Cordova 15 makes the navigation bar transparent in edge-to-edge mode. */
-    private boolean isGestureNavigation(Window window) {
+    private Boolean isGestureNavigation(Window window) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return false;
 
+        // Android exposes the selected navigation mode directly. Value 2 is
+        // gestural navigation; this is more reliable than inferring the mode
+        // from inset sizes, which vary across API 29/30 devices.
+        int navigationMode = Settings.Secure.getInt(
+                window.getContext().getContentResolver(), "navigation_mode", -1);
+        if (navigationMode == 2) return true;
+        if (navigationMode == 0 || navigationMode == 1) return false;
+
         WindowInsetsCompat insets = ViewCompat.getRootWindowInsets(window.getDecorView());
-        if (insets == null) return false;
+        if (insets == null) return null;
 
         Insets navigationBars = insets.getInsetsIgnoringVisibility(WindowInsetsCompat.Type.navigationBars());
         Insets mandatoryGestures = insets.getInsets(WindowInsetsCompat.Type.mandatorySystemGestures());
@@ -434,32 +445,48 @@ public class StatusBar extends CordovaPlugin {
 
     private void scheduleOpaqueNavigationBarUpdate() {
         if (!isCordovaAndroid15OrLater()) return;
+        cordova.getActivity().getWindow().getDecorView().post(this::updateNavigationBarAppearance);
+    }
+
+    private void registerNavigationBarLayoutListener() {
+        if (!isCordovaAndroid15OrLater() || navigationBarLayoutListener != null) return;
         View decor = cordova.getActivity().getWindow().getDecorView();
-        decor.postDelayed(new Runnable() {
-            @Override
-            public void run() {
-                Window window = cordova.getActivity().getWindow();
-                int color = Color.parseColor(getThemeStatusBarColor());
-                if (!preferences.getBoolean("StatusBarOverlaysWebView", true)) {
-                    window.setStatusBarColor(color);
-                    setCordovaStatusBarViewColor(color);
-                }
-                boolean gestureNavigation = isGestureNavigation(window);
-                if (gestureNavigation) {
-                    window.setNavigationBarColor(Color.TRANSPARENT);
-                } else {
-                    window.setNavigationBarColor(color);
-                }
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-                    window.setNavigationBarDividerColor(gestureNavigation ? Color.TRANSPARENT : color);
-                }
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                    window.setNavigationBarContrastEnforced(false);
-                }
-                WindowInsetsControllerCompat controller = WindowCompat.getInsetsController(window, window.getDecorView());
-                controller.setAppearanceLightNavigationBars(!isDarkTheme());
+        navigationBarLayoutListener = this::updateNavigationBarAppearance;
+        decor.getViewTreeObserver().addOnGlobalLayoutListener(navigationBarLayoutListener);
+    }
+
+    private void updateNavigationBarAppearance() {
+        Window window = cordova.getActivity().getWindow();
+        int color = Color.parseColor(getThemeStatusBarColor());
+        if (!preferences.getBoolean("StatusBarOverlaysWebView", true)) {
+            window.setStatusBarColor(color);
+            setCordovaStatusBarViewColor(color);
+        }
+        Boolean gestureNavigationResult = isGestureNavigation(window);
+        if (gestureNavigationResult == null) return;
+        boolean gestureNavigation = gestureNavigationResult;
+        window.setNavigationBarColor(gestureNavigation ? Color.TRANSPARENT : color);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            window.setNavigationBarDividerColor(gestureNavigation ? Color.TRANSPARENT : color);
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            window.setNavigationBarContrastEnforced(false);
+        }
+        WindowInsetsControllerCompat controller = WindowCompat.getInsetsController(window, window.getDecorView());
+        controller.setAppearanceLightNavigationBars(!isDarkTheme());
+    }
+
+
+    @Override
+    public void onDestroy() {
+        if (navigationBarLayoutListener != null && cordova != null) {
+            View decor = cordova.getActivity().getWindow().getDecorView();
+            if (decor.getViewTreeObserver().isAlive()) {
+                decor.getViewTreeObserver().removeOnGlobalLayoutListener(navigationBarLayoutListener);
             }
-        }, 150);
+            navigationBarLayoutListener = null;
+        }
+        super.onDestroy();
     }
 
     private void setCordovaStatusBarViewColor(int color) {
