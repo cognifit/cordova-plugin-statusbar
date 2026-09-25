@@ -16,7 +16,7 @@
  * specific language governing permissions and limitations
  * under the License.
  *
-*/
+ */
 package org.apache.cordova.statusbar;
 
 import android.app.Activity;
@@ -55,6 +55,8 @@ public class StatusBar extends CordovaPlugin {
     private CordovaWebView cordovaWebView;
     private android.view.ViewTreeObserver.OnGlobalLayoutListener navigationBarLayoutListener;
     private View navigationBarProtectionView;
+    private Integer lastAppliedProtectionViewHeight;
+    private Integer lastAppliedProtectionViewColor;
 
     /**
      * Sets the context of the Command. This can then be used to do things like
@@ -367,13 +369,13 @@ public class StatusBar extends CordovaPlugin {
                 int uiOptions = decorView.getSystemUiVisibility();
 
                 String[] darkContentStyles = {
-                    "default",
+                        "default",
                 };
 
                 String[] lightContentStyles = {
-                    "lightcontent",
-                    "blacktranslucent",
-                    "blackopaque",
+                        "lightcontent",
+                        "blacktranslucent",
+                        "blackopaque",
                 };
 
                 if (Arrays.asList(darkContentStyles).contains(style.toLowerCase())) {
@@ -503,6 +505,19 @@ public class StatusBar extends CordovaPlugin {
             height = insets.getInsets(WindowInsetsCompat.Type.tappableElement()).bottom;
         }
 
+        // Guard against a self-triggering layout loop: setLayoutParams() always calls
+        // requestLayout(), which schedules another global layout pass. Since this method
+        // runs from an OnGlobalLayoutListener, reapplying the same height/color on every
+        // pass (even when nothing changed) creates an infinite loop that starves the
+        // Choreographer and can leave the screen black with the app otherwise still alive.
+        // Only touch the view when something actually changed.
+        if (lastAppliedProtectionViewHeight != null && lastAppliedProtectionViewHeight == height
+                && lastAppliedProtectionViewColor != null && lastAppliedProtectionViewColor == color) {
+            return;
+        }
+        lastAppliedProtectionViewHeight = height;
+        lastAppliedProtectionViewColor = color;
+
         FrameLayout.LayoutParams layoutParams =
                 (FrameLayout.LayoutParams) navigationBarProtectionView.getLayoutParams();
         layoutParams.width = ViewGroup.LayoutParams.MATCH_PARENT;
@@ -530,6 +545,8 @@ public class StatusBar extends CordovaPlugin {
             }
             navigationBarProtectionView = null;
         }
+        lastAppliedProtectionViewHeight = null;
+        lastAppliedProtectionViewColor = null;
         super.onDestroy();
     }
 
