@@ -22,6 +22,8 @@ package org.apache.cordova.statusbar;
 import android.app.Activity;
 import android.content.res.Configuration;
 import android.graphics.Color;
+import android.graphics.drawable.ColorDrawable;
+import android.graphics.drawable.Drawable;
 import android.os.Build;
 import android.provider.Settings;
 import android.view.View;
@@ -57,6 +59,8 @@ public class StatusBar extends CordovaPlugin {
     private View navigationBarProtectionView;
     private Integer lastAppliedProtectionViewHeight;
     private Integer lastAppliedProtectionViewColor;
+    /** Resource id of cdv_background_color: 0 when not looked up yet, -1 when the app has none. */
+    private int themeBackgroundColorId = 0;
 
     /**
      * Sets the context of the Command. This can then be used to do things like
@@ -414,10 +418,14 @@ public class StatusBar extends CordovaPlugin {
     }
 
     private String getThemeStatusBarColor() {
-        int colorId = cordova.getActivity().getResources().getIdentifier(
-                "cdv_background_color", "color", cordova.getActivity().getPackageName());
-        if (colorId != 0) {
-            return String.format("#%08X", ContextCompat.getColor(cordova.getActivity(), colorId));
+        // The resource id never changes while the app runs; only the colour it resolves to does (dark mode).
+        if (themeBackgroundColorId == 0) {
+            int colorId = cordova.getActivity().getResources().getIdentifier(
+                    "cdv_background_color", "color", cordova.getActivity().getPackageName());
+            themeBackgroundColorId = colorId != 0 ? colorId : -1;
+        }
+        if (themeBackgroundColorId > 0) {
+            return String.format("#%08X", ContextCompat.getColor(cordova.getActivity(), themeBackgroundColorId));
         }
         return isDarkTheme() ? "#121318" : "#FAF8FF";
     }
@@ -460,26 +468,41 @@ public class StatusBar extends CordovaPlugin {
         decor.getViewTreeObserver().addOnGlobalLayoutListener(navigationBarLayoutListener);
     }
 
+    /**
+     * Runs on every global layout pass, so it only touches the window when a value differs. Each
+     * Window.setStatusBarColor / setNavigationBarColor call makes the Activity send its task description
+     * to the system server (a binder call on the main thread), even when the colour is the same; on
+     * low-end phones that showed up in ANRs during navigation.
+     */
     private void updateNavigationBarAppearance() {
         Window window = cordova.getActivity().getWindow();
         int color = Color.parseColor(getThemeStatusBarColor());
         if (!preferences.getBoolean("StatusBarOverlaysWebView", true)) {
-            window.setStatusBarColor(color);
+            if (window.getStatusBarColor() != color) {
+                window.setStatusBarColor(color);
+            }
             setCordovaStatusBarViewColor(color);
         }
         Boolean gestureNavigationResult = isGestureNavigation(window);
         if (gestureNavigationResult == null) return;
         boolean gestureNavigation = gestureNavigationResult;
-        window.setNavigationBarColor(gestureNavigation ? Color.TRANSPARENT : color);
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-            window.setNavigationBarDividerColor(gestureNavigation ? Color.TRANSPARENT : color);
+        int navigationBarColor = gestureNavigation ? Color.TRANSPARENT : color;
+        if (window.getNavigationBarColor() != navigationBarColor) {
+            window.setNavigationBarColor(navigationBarColor);
         }
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P
+                && window.getNavigationBarDividerColor() != navigationBarColor) {
+            window.setNavigationBarDividerColor(navigationBarColor);
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && window.isNavigationBarContrastEnforced()) {
             window.setNavigationBarContrastEnforced(false);
         }
         updateNavigationBarProtectionView(window, color, gestureNavigation);
         WindowInsetsControllerCompat controller = WindowCompat.getInsetsController(window, window.getDecorView());
-        controller.setAppearanceLightNavigationBars(!isDarkTheme());
+        boolean lightNavigationBars = !isDarkTheme();
+        if (controller.isAppearanceLightNavigationBars() != lightNavigationBars) {
+            controller.setAppearanceLightNavigationBars(lightNavigationBars);
+        }
     }
 
     /**
@@ -559,7 +582,10 @@ public class StatusBar extends CordovaPlugin {
             for (int i = 0; i < group.getChildCount(); i++) {
                 View child = group.getChildAt(i);
                 if ("statusBarView".equals(child.getTag())) {
-                    child.setBackgroundColor(color);
+                    Drawable background = child.getBackground();
+                    if (!(background instanceof ColorDrawable) || ((ColorDrawable) background).getColor() != color) {
+                        child.setBackgroundColor(color);
+                    }
                     return;
                 }
             }
